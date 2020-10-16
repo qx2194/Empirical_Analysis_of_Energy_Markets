@@ -1,0 +1,216 @@
+---
+title: "Problem Set 1"
+author: "Zora Xiang"
+date: "10/3/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:/Users/qixin/Documents/R/Empirical Analysis of Energy Markets/PS1")
+```
+
+```{r}
+library("readxl")
+library("data.table")
+library("ggplot2")
+library("tidyverse")
+library("stargazer")
+library("estimatr")
+```
+
+```{r}
+#1. (a) & (b)
+capacity_1 <- read_excel("epa_04_02_a.xlsx", sheet = 1, col_names = FALSE, col_types = NULL, skip = 4, n_max = 11)
+capacity_2 <- read_excel("epa_04_02_b.xlsx", sheet = 1, col_names = FALSE, col_types = NULL, skip = 6, n_max = 11)
+
+#Change the column names
+columns_1 <- c('Year', 'Coal', 'Petro', 'Gas_nat', 'Gas_others','Nuclear','Hydro_con', 'Other_renew', 'Hydro_pump', 'Others', 'Utility', 'PV_small')
+names(columns_1) <- names(capacity_1)
+setnames(capacity_1, columns_1)
+
+columns_2 <- c('Year', 'Wind', 'PV_utility', 'Solar_thermal', 'Wood','Geothermal','Biomass', 'Other_renew', 'PV_small', 'PV_total', 'Solar')
+names(columns_2) <- names(capacity_2)
+setnames(capacity_2, columns_2)
+```
+
+
+```{r}
+#(c)
+#Convert to data.table
+DT_1 <- as.data.table(capacity_1)
+DT_2 <- as.data.table(capacity_2)
+#Eliminate all "--" s
+DT_1[PV_small == "--", PV_small := 0]
+DT_1[, PV_small := as.numeric(PV_small)]
+DT_2[PV_small == "--", PV_small := 0]
+DT_2[, PV_small := as.numeric(PV_small)]
+#Generate the whole dataset
+DT <- cbind(DT_1, DT_2)
+Gas <- DT$Gas_nat + DT$Gas_others
+Hydro <- DT$Hydro_con + DT$Hydro_pump
+Solar_PV <- DT$PV_small + DT$PV_utility
+Biomass <- DT$Wood + DT$Biomass
+Total_capacity <- DT$Utility + DT$PV_small
+capacity <- cbind(DT, Gas, Hydro, Solar_PV, Biomass, Total_capacity)
+capacity <- capacity[,-c(4,5,7:9,10,11:13,15,17,19:23)]
+```
+
+
+```{r}
+#(d)
+#Ploting the total capacity
+Years <- factor(capacity$Year)
+ggplot(capacity, aes(Years, Total_capacity)) + geom_bar(stat = "identity", width = 0.4) + scale_y_continuous(1000000,1200000) + labs(title = "Total Capacity 2008-2018", x = "Years", y = "Total Capacity (MW)") + theme_classic()
+```
+
+```{r}
+#(e)
+capacity_melt <- melt(capacity,'Year')
+capacity_melt <- capacity_melt[-c(111:121), ]
+ggplot(capacity_melt, aes(x = Year, y = value, fill = variable)) + geom_bar(position = 'stack', stat = 'identity') + labs(title = "Total Capacity by Energy Sources 2008-2018", x = "Years", y = "MW")
+#The percentagesof coal and petro capacity decreased, while wind, solar PV and biomass increased.
+```
+
+
+
+```{r}
+#2. (a)
+emissions_raw <- read.csv("MER_T11_06.csv")
+emissions_raw$MSN <- factor(emissions_raw$MSN)
+emissions_raw$Description <- factor(emissions_raw$Description)
+emissions_raw$Value <- as.numeric(emissions_raw$Value)
+str(emissions_raw)
+MM <- c(rep(c(1,2,3,4,5,6,7,8,9,10,11,12,13), 47),1,2,3,4,5,6)
+MM <- rep(MM,9)
+emissions_raw <- cbind(emissions_raw,MM)
+emissions_annual <- subset(emissions_raw, MM == 13)
+YYYY <- rep(c(1973:2019),9)
+emissions_annual <- cbind(emissions_annual, YYYY)
+```
+
+
+```{r}
+#(b)
+emissions_total <- subset(emissions_annual, MSN == "TXEIEUS")
+ggplot(emissions_total, aes(x = YYYY, y = Value)) + geom_bar(stat = "identity", width = 0.5) + labs(title = "Total Energy Electric Power Sector Carbon Emissions 1973-2019", x = "Years", y = "Million Tons")
+#It seems that the annual emission of total power sector of the US peaked around 2007, and has been declining ever since.
+```
+
+
+```{r}
+#(c)
+emissions_annual <- subset(emissions_annual, Column_Order != 9)
+emissions_annual$Description <- rep(c('Coal', 'Oil', 'Geothermal', 'Natural Gas', 'Non-Biomass Waste', 'Oil', 'Oil', 'Oil'),each = 47)
+emissions_annual$Description <- factor(emissions_annual$Description, order = TRUE, levels = c('Non-Biomass Waste','Geothermal','Oil','Natural Gas','Coal'))
+ggplot(emissions_annual, aes(YYYY, Value, fill = Description)) + geom_bar(position = 'stack', stat = 'identity', width = 1) + labs(title = "Carbon Emissions of US Power Sector by Energy Sources 1973-2019", x = "Years", y = "Million Tons")
+#It seems that the carbon emissions have always been dominantly from coal sources, but the share of coal emissions have been declining since 2007 with its actual number.
+```
+
+```{r}
+#3. (a)
+#Import and unzip
+url <- "https://www.eia.gov/electricity/data/eia860/xls/eia8602019.zip"
+data_folder <-  "data"
+dir.create(file.path(".", data_folder), showWarnings = T)
+fname <- file.path(data_folder, basename(url))
+fname
+if (!file.exists(fname)){
+  download.file(url, fname)
+unzip(fname, exdir = data_folder)
+}
+fname <- file.path(data_folder, "3_1_Generator_Y2019.xlsx")
+#Extract data needed as df and filter
+operable <-  as.data.table(read_excel(fname, sheet = "Operable", skip = 1, na = 'NA'))
+str(operable)
+operable[,sum(is.na(`Operating Year`))]
+operable[is.na(`Operating Year`),] 
+retired <-  as.data.table(read_excel(fname, sheet = "Retired and Canceled", skip = 1, na = 'NA'))
+retired[,sum(is.na(`Operating Year`))]
+retired[,sum(is.na(`Retirement Year`))]
+df <-  rbindlist(list(operable, retired), use.names = T, fill =  T, idcol = T)
+df[,sum(is.na(`Operating Year`))]
+df[,sum(is.na(`Retirement Year`))]
+df<- df[!is.na(`Operating Year`)]
+str(df)
+#Convert to numeric
+num_cols <-  colnames(df)[grep("MW|Plant Code|Year|Month|Factor|Buoys", colnames(df), ignore.case=T)]
+df[, (num_cols):= lapply(.SD, as.numeric), .SDcols = num_cols]
+#Set Key
+colnames(df)
+df[,upyear := `Operating Year`]
+df[,downyear := `Retirement Year`]
+df[,capacity :=`Nameplate Capacity (MW)`]
+setkey(df, upyear, Technology)
+```
+
+```{r}
+#Calculate additional and retiring capacity each year
+add <- df[!is.na(upyear),.(year = upyear,capacity_additions = sum(capacity,na.rm = T)), by = key(df)]
+subtract <-  df[!is.na(downyear),.(year = downyear,capacity_subtractions = sum(capacity,na.rm = T)), by = .(downyear, Technology)]
+add
+subtract
+cap <- as.data.table(expand_grid('year' = min(add[,year]):max(add[,year]), 'Technology' = unique(add[,Technology])))
+head(cap)
+setkey(add, year, Technology)
+setkey(subtract, year, Technology)
+setkey(cap, year, Technology)
+add_subtract <-merge(add, subtract, all = TRUE)
+cap <- merge(cap, add_subtract,all.x = TRUE)
+head(cap,50)
+#Calculate capacity change
+cap[is.na(capacity_additions), capacity_additions:= 0]
+cap[is.na(capacity_subtractions), capacity_subtractions:= 0]
+cap_final <- cap[,.(net_capacity_change = capacity_additions-capacity_subtractions), by = key(cap)]
+cap_final[, capacity := cumsum(net_capacity_change), by = Technology]
+cap_final[,Technology:= as.factor(Technology)]
+cap_final
+```
+
+```{r}
+#(b)
+ggplot(cap_final, aes(x = year, y= capacity)) +
+  geom_bar(stat = 'identity', width = 0.3) + labs(title = "United States Electricity Generation Capacity 1891-2019", x = "Years", y = "Million Tons") + theme_classic()
+```
+
+```{r}
+#(c)
+ggplot(cap_final, aes(x = year, y= capacity, fill = Technology)) +
+  geom_area(position = 'stack') +
+  theme(legend.text = element_text(size = 5), legend.position = c(0,0.5)) +
+  guides(fill = guide_legend(ncol = 1)) +
+  ylab("Nameplate Capacity (MW)") +
+  ggtitle("US Electricity Generation Capacity by Technology", subtitle = "source: EIA-860 data")
+```
+
+```{r}
+#(d)
+emissions_coal <- subset(emissions_annual, MSN == "CLEIEUS")
+ggplot() +
+  geom_area(data = cap_final,aes(x = year, y= capacity, fill = Technology), position = 'stack') +
+  theme(legend.text = element_text(size = 5), legend.position = c(0,0.5)) +
+  guides(fill = guide_legend(ncol = 1)) +
+  ylab("Nameplate Capacity (MW)") +
+  ggtitle("US Electricity Generation Capacity by Technology", subtitle = "source: EIA-860 data") + xlim(1973, 2019) + geom_line(data = emissions_coal, aes(x = YYYY, y = Value*500)) 
+#We can see that coal emission declining followed decreasing of the coal capacity in the US.
+```
+
+```{r}
+#4.
+cap_final <- cap_final[!year < 1973]
+coal_1 <- cap_final[Technology == "Coal Integrated Gasification Combined Cycle"]
+coal_2 <- cap_final[Technology == "Conventional Steam Coal"]
+gas_1 <- cap_final[Technology == "Natural Gas Fired Combined Cycle"]
+gas_2 <- cap_final[Technology == "Natural Gas Internal Combustion Engine"]
+gas_3 <- cap_final[Technology == "Natural Gas Steam Turbine"]
+gas_4 <- cap_final[Technology == "Natural Gas Fired Combustion Turbine"]
+regression <- data.table(year = cap_final$year, coal_capacity = coal_1$capacity + coal_2$capacity, gas_capacity = gas_1$capacity + gas_2$capacity + gas_3$capacity + gas_4$capacity, total_emissions = emissions_total$Value)
+str(regression)
+fit1 <- lm(total_emissions ~ coal_capacity, regression)
+fit2 <- lm(total_emissions ~ coal_capacity + gas_capacity, regression)
+stargazer(fit1, fit2, se = starprep(fit1, fit2), type = 'text')
+#We can conclude that gas capacities also influenced the total carbon emissions.
+```
+
+
+
